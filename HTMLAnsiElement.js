@@ -90,19 +90,63 @@ class HTMLAnsiElement extends HTMLElement{
 		const srg = this.constructor.srg;
 		const it = {
 			*[Symbol.iterator](){
-				const matches = this.str.matchAll(/(?:(?:\x9B|\x1B\[)[0-?]*[ -\/]*[@-~])+/g);
+				const matches = this.str.matchAll(/(?:(?:\x9B|\x1B\[)[0-9;?]*[ -\/]*[@-~]|\x1B[\]PX^_].*?(?:\x07|\x1B\\))+/g);
 				let current = 0;
 				for(let match of matches){
 					const escData = {
 						index: match.index,
 						length: match.at(0).length,
-						items: match.at(0).split(/\x9B|\x1B\[/).slice(1)
+						items: match.at(0).split(/(?=(?:\x9B|\x1B\[)[0-9;?]*[ -\/]*[@-~]|\x1B[\]PX^_].*?(?:\x07|\x1B\\))/)
 					};
 					if(current < escData.index){
 						yield this.str.slice(current, escData.index);
 					}
 					current = escData.index + escData.length
-					yield escData.items;
+					if(escData.items.length > 0){
+						yield escData.items.map(item => {
+							if(item.startsWith("\x9B")){
+								return {
+									type: "CSI",
+									opcode: item.slice(-1),
+									params: item.slice(1, -1).split(";")
+								};
+							}
+							const ch = item.charAt(1);
+							if(ch == "["){
+								return {
+									type: "CSI",
+									opcode: item.slice(-1),
+									params: item.slice(2, -1).split(";")
+								};
+							}
+							const ei = item.endsWith("\x07") ? -1 : -2;
+							if(ch == "]"){
+								return {
+									type: "OCS",
+									data: item.slice(2, ei)
+								};
+							}
+							if(ch == "P"){
+								return {
+									type: "DCS",
+									data: item.slice(2, ei)
+								};
+							}
+							if(ch == "^"){
+								return {
+									type: "PM",
+									data: item.slice(2, ei)
+								};
+							}
+							if(ch == "_"){
+								return {
+									type: "APC",
+									data: item.slice(2, ei)
+								};
+							}
+							return {type: "UNKNOWN"};
+						});
+					}
 				}
 				const str = this.str.slice(current);
 				if(str != ""){
@@ -111,28 +155,33 @@ class HTMLAnsiElement extends HTMLElement{
 			},
 			str: this.textContent
 		}
+		const opr = esc => {
+			if(esc.type == "CSI"){
+				if(esc.opcode == "J"){
+					if(esc.opcode.at(0) == "2"){
+						ansi.innerHTML = "";
+					}
+					return;
+				}
+				if(esc.opcode == "m"){
+					const param1 = esc.params.shift();
+					const csi = srg[param1];
+					if(csi == null){
+						return;
+					}
+					if(typeof csi == "function"){
+						csi(ctx);
+						return;
+					}
+					const param2 = esc.params.shift();
+					csi[param2](ctx, esc.params);
+					return;
+				}
+			}
+		};
 		for(let token of it){
 			if(Array.isArray(token)){
-				for(let esc of token){
-					if(esc == "2J"){
-						ansi.innerHTML = "";
-						continue;
-					}
-					if(esc.endsWith("m")){
-						const csi = srg[esc.slice(0, esc.indexOf(";"))];
-						if(csi == null){
-							continue;
-						}
-						if(typeof csi == "function"){
-							csi(ctx);
-							continue;
-						}
-						const values = esc.slice(esc.indexOf(";") + 1, -1).split(";");
-						const sub = values.shift();
-						csi[sub](ctx, values);
-						continue;
-					}
-				}
+				token.forEach(opr);
 				continue;
 			}
 			const str = token;
@@ -172,7 +221,7 @@ class HTMLAnsiElement extends HTMLElement{
 	get textIndex(){
 		const res = [];
 		const text = this.textContent;
-		const matches = text.matchAll(/(?:(?:\x9B|\x1B\[)[0-?]*[ -\/]*[@-~])+/g);
+		const matches = text.matchAll(/(?:(?:\x9B|\x1B\[)[0-9;?]*[ -\/]*[@-~]|\x1B[\]PX^_].*?(?:\x07|\x1B\\))+/g);
 		let pos = 0;
 		for(let match of matches){
 			for(let i = pos; i <= match.index; i++){
