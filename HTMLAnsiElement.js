@@ -7,6 +7,13 @@ class HTMLAnsiElement extends HTMLElement{
 		const ansi = this.ansi = (document.contentType == "text/html") ? document.createElement("span") : document.createElementNS("http://www.w3.org/1999/xhtml", "span");
 		ansi.classList.add("ansi");
 		shadow.adoptedStyleSheets.push(this.constructor.styleSheet);
+		if(this.hasAttribute("apc")){
+			this.getAttribute("apc").split(/\s+/).forEach(item => {
+				if((item in this.constructor.apc) && ("styleSheet" in this.constructor.apc[item])){
+					shadow.adoptedStyleSheets.push(this.constructor.apc[item].styleSheet);
+				}
+			});
+		}
 		shadow.appendChild(this.ansi = ansi);
 		this.constructor.observer.observe(this, {
 			characterData: true,
@@ -18,64 +25,6 @@ class HTMLAnsiElement extends HTMLElement{
 			e.preventDefault();
 		});
 	}
-	static srg = {
-		["0"](ctx){ Object.assign(ctx, {textColor: null, backgroundColor: null, bold: false, italic: false, underline: false, strike: false}); },
-		["7"](ctx){
-			const {textColor, backgroundColor} = ctx;
-			ctx.textColor = backgroundColor;
-			ctx.backgroundColor = textColor;
-		},
-		["1"](ctx){ ctx.bold = true; },
-		["3"](ctx){ ctx.italic = true; },
-		["4"](ctx){ ctx.underline = true; },
-		["9"](ctx){ ctx.strike = true; },
-		["22"](ctx){ ctx.bold = false; },
-		["23"](ctx){ ctx.italic = false; },
-		["24"](ctx){ ctx.underline = false; },
-		["29"](ctx){ ctx.strike = false; },
-		["30"](ctx){ ctx.textColor = {attr: "c", value: "0"}; },
-		["31"](ctx){ ctx.textColor = {attr: "c", value: "1"}; },
-		["32"](ctx){ ctx.textColor = {attr: "c", value: "2"}; },
-		["33"](ctx){ ctx.textColor = {attr: "c", value: "3"}; },
-		["34"](ctx){ ctx.textColor = {attr: "c", value: "4"}; },
-		["35"](ctx){ ctx.textColor = {attr: "c", value: "5"}; },
-		["36"](ctx){ ctx.textColor = {attr: "c", value: "6"}; },
-		["37"](ctx){ ctx.textColor = {attr: "c", value: "7"}; },
-		["90"](ctx){ ctx.textColor = {attr: "c", value: "8"}; },
-		["91"](ctx){ ctx.textColor = {attr: "c", value: "9"}; },
-		["92"](ctx){ ctx.textColor = {attr: "c", value: "10"}; },
-		["93"](ctx){ ctx.textColor = {attr: "c", value: "11"}; },
-		["94"](ctx){ ctx.textColor = {attr: "c", value: "12"}; },
-		["95"](ctx){ ctx.textColor = {attr: "c", value: "13"}; },
-		["96"](ctx){ ctx.textColor = {attr: "c", value: "14"}; },
-		["97"](ctx){ ctx.textColor = {attr: "c", value: "15"}; },
-		["38"]: {
-			["2"](ctx, values){ ctx.textColor = {attr: "rgb", value: "#" + values.map(v => Number(v).toString(16).padStart(2, "0")).join("")}; },
-			["5"](ctx, values){ ctx.textColor = {attr: "c", value: values.at(0)}; }
-		},
-		["39"](ctx){ ctx.textColor = null; },
-		["40"](ctx){ ctx.backgroundColor = {attr: "c", value: "0"}; },
-		["41"](ctx){ ctx.backgroundColor = {attr: "c", value: "1"}; },
-		["42"](ctx){ ctx.backgroundColor = {attr: "c", value: "2"}; },
-		["43"](ctx){ ctx.backgroundColor = {attr: "c", value: "3"}; },
-		["44"](ctx){ ctx.backgroundColor = {attr: "c", value: "4"}; },
-		["45"](ctx){ ctx.backgroundColor = {attr: "c", value: "5"}; },
-		["46"](ctx){ ctx.backgroundColor = {attr: "c", value: "6"}; },
-		["47"](ctx){ ctx.backgroundColor = {attr: "c", value: "7"}; },
-		["100"](ctx){ ctx.backgroundColor = {attr: "c", value: "8"}; },
-		["101"](ctx){ ctx.backgroundColor = {attr: "c", value: "9"}; },
-		["102"](ctx){ ctx.backgroundColor = {attr: "c", value: "10"}; },
-		["103"](ctx){ ctx.backgroundColor = {attr: "c", value: "11"}; },
-		["104"](ctx){ ctx.backgroundColor = {attr: "c", value: "12"}; },
-		["105"](ctx){ ctx.backgroundColor = {attr: "c", value: "13"}; },
-		["106"](ctx){ ctx.backgroundColor = {attr: "c", value: "14"}; },
-		["107"](ctx){ ctx.backgroundColor = {attr: "c", value: "15"}; },
-		["48"]: {
-			["2"](ctx, values){ ctx.backgroundColor = {attr: "rgb", value: "#" + values.map(v => Number(v).toString(16).padStart(2, "0")).join("")}; },
-			["5"](ctx, values){ ctx.backgroundColor = {attr: "c", value: values.at(0)}; }
-		},
-		["49"](ctx){ ctx.backgroundColor = null; }
-	};
 	render(){
 		this.ansi.innerHTML = "";
 		const ctx = {
@@ -85,9 +34,11 @@ class HTMLAnsiElement extends HTMLElement{
 			bold: false,
 			italic: false,
 			underline: false,
-			strike: false
+			strike: false,
+			apc: {}
 		};
 		const srg = this.constructor.srg;
+		const apcList = (this.hasAttribute("apc") ? this.getAttribute("apc") : "").split(/\s+/).filter(item => item in this.constructor.apc);
 		const it = {
 			*[Symbol.iterator](){
 				const matches = this.str.matchAll(/(?:(?:\x9B|\x1B\[)[0-9;?]*[ -\/]*[@-~]|\x1B[\]PX^_].*?(?:\x07|\x1B\\))+/g);
@@ -177,6 +128,15 @@ class HTMLAnsiElement extends HTMLElement{
 					csi[param2](ctx, esc.params);
 					return;
 				}
+				return;
+			}
+			if(esc.type == "APC"){
+				for(let apcName of apcList){
+					const apcItem = this.constructor.apc[apcName];
+					if("apc" in apcItem){
+						ctx.apc[apcName] = apcItem.apc(ctx.apc[apcName] ?? null, esc.data);
+					}
+				}
 			}
 		};
 		for(let token of it){
@@ -187,7 +147,6 @@ class HTMLAnsiElement extends HTMLElement{
 			const str = token;
 			const span = (document.contentType == "text/html") ? document.createElement("span") : document.createElementNS("http://www.w3.org/1999/xhtml", "span");
 			let plain = true;
-			span.textContent = str;
 			if(ctx.textColor != null){
 				plain = false;
 				span.setAttribute("data-t" + ctx.textColor.attr, ctx.textColor.value);
@@ -212,11 +171,31 @@ class HTMLAnsiElement extends HTMLElement{
 				plain = false;
 				span.classList.add("strike");
 			}
+			for(let apcName of apcList){
+				const apcItem = this.constructor.apc[apcName];
+				if("render" in apcItem){
+					if(apcItem.render(ctx.apc[apcName] ?? null, span)){
+						plain = false;
+					}
+				}
+			}
+			span.textContent = str;
 			this.ansi.append(plain ? span.textContent : span);
 		}
 	}
 	disconnectedCallback() {
 		this.constructor.observer.disconnect(this);
+	}
+	attributeChangedCallback(name, oldValue, newValue){
+		if((this.shadow != null) && (name == "apc")){
+			this.shadow.adoptedStyleSheets.splice(0, this.shadow.adoptedStyleSheets.length, this.constructor.styleSheet);
+			newValue?.split(/\s+/)?.forEach(item => {
+				if((item in this.constructor.apc) && ("styleSheet" in this.constructor.apc[item])){
+					this.shadow.adoptedStyleSheets.push(this.constructor.apc[item].styleSheet);
+				}
+			});
+			this.render();
+		}
 	}
 	get textIndex(){
 		const res = [];
@@ -260,6 +239,71 @@ class HTMLAnsiElement extends HTMLElement{
 	sliceText(...args){
 		return this.textContent.slice(...args.map(function(i){return this.at(i);}, this.textIndex));
 	}
+	static get observedAttributes(){
+		return ["apc"];
+	}
+	static install(name, options){
+		this.apc[name] = options;
+	}
+	static apc = {};
+	static srg = {
+		["0"](ctx){ Object.assign(ctx, {textColor: null, backgroundColor: null, bold: false, italic: false, underline: false, strike: false, apc: {}}); },
+		["7"](ctx){
+			const {textColor, backgroundColor} = ctx;
+			ctx.textColor = backgroundColor;
+			ctx.backgroundColor = textColor;
+		},
+		["1"](ctx){ ctx.bold = true; },
+		["3"](ctx){ ctx.italic = true; },
+		["4"](ctx){ ctx.underline = true; },
+		["9"](ctx){ ctx.strike = true; },
+		["22"](ctx){ ctx.bold = false; },
+		["23"](ctx){ ctx.italic = false; },
+		["24"](ctx){ ctx.underline = false; },
+		["29"](ctx){ ctx.strike = false; },
+		["30"](ctx){ ctx.textColor = {attr: "c", value: "0"}; },
+		["31"](ctx){ ctx.textColor = {attr: "c", value: "1"}; },
+		["32"](ctx){ ctx.textColor = {attr: "c", value: "2"}; },
+		["33"](ctx){ ctx.textColor = {attr: "c", value: "3"}; },
+		["34"](ctx){ ctx.textColor = {attr: "c", value: "4"}; },
+		["35"](ctx){ ctx.textColor = {attr: "c", value: "5"}; },
+		["36"](ctx){ ctx.textColor = {attr: "c", value: "6"}; },
+		["37"](ctx){ ctx.textColor = {attr: "c", value: "7"}; },
+		["90"](ctx){ ctx.textColor = {attr: "c", value: "8"}; },
+		["91"](ctx){ ctx.textColor = {attr: "c", value: "9"}; },
+		["92"](ctx){ ctx.textColor = {attr: "c", value: "10"}; },
+		["93"](ctx){ ctx.textColor = {attr: "c", value: "11"}; },
+		["94"](ctx){ ctx.textColor = {attr: "c", value: "12"}; },
+		["95"](ctx){ ctx.textColor = {attr: "c", value: "13"}; },
+		["96"](ctx){ ctx.textColor = {attr: "c", value: "14"}; },
+		["97"](ctx){ ctx.textColor = {attr: "c", value: "15"}; },
+		["38"]: {
+			["2"](ctx, values){ ctx.textColor = {attr: "rgb", value: "#" + values.map(v => Number(v).toString(16).padStart(2, "0")).join("")}; },
+			["5"](ctx, values){ ctx.textColor = {attr: "c", value: values.at(0)}; }
+		},
+		["39"](ctx){ ctx.textColor = null; },
+		["40"](ctx){ ctx.backgroundColor = {attr: "c", value: "0"}; },
+		["41"](ctx){ ctx.backgroundColor = {attr: "c", value: "1"}; },
+		["42"](ctx){ ctx.backgroundColor = {attr: "c", value: "2"}; },
+		["43"](ctx){ ctx.backgroundColor = {attr: "c", value: "3"}; },
+		["44"](ctx){ ctx.backgroundColor = {attr: "c", value: "4"}; },
+		["45"](ctx){ ctx.backgroundColor = {attr: "c", value: "5"}; },
+		["46"](ctx){ ctx.backgroundColor = {attr: "c", value: "6"}; },
+		["47"](ctx){ ctx.backgroundColor = {attr: "c", value: "7"}; },
+		["100"](ctx){ ctx.backgroundColor = {attr: "c", value: "8"}; },
+		["101"](ctx){ ctx.backgroundColor = {attr: "c", value: "9"}; },
+		["102"](ctx){ ctx.backgroundColor = {attr: "c", value: "10"}; },
+		["103"](ctx){ ctx.backgroundColor = {attr: "c", value: "11"}; },
+		["104"](ctx){ ctx.backgroundColor = {attr: "c", value: "12"}; },
+		["105"](ctx){ ctx.backgroundColor = {attr: "c", value: "13"}; },
+		["106"](ctx){ ctx.backgroundColor = {attr: "c", value: "14"}; },
+		["107"](ctx){ ctx.backgroundColor = {attr: "c", value: "15"}; },
+		["48"]: {
+			["2"](ctx, values){ ctx.backgroundColor = {attr: "rgb", value: "#" + values.map(v => Number(v).toString(16).padStart(2, "0")).join("")}; },
+			["5"](ctx, values){ ctx.backgroundColor = {attr: "c", value: values.at(0)}; }
+		},
+		["49"](ctx){ ctx.backgroundColor = null; }
+	};
 	static observer = new MutationObserver(function(mutationList, observer){
 		const elements = new Set(Array.from(
 			mutationList,
