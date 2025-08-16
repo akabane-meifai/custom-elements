@@ -3,7 +3,7 @@ if(typeof HTMLAnsiElement != "function"){
 	return;
 }
 const plugin = {
-	apc(ctx, data){
+	apc(ctx, data, proxy){
 		if(data == "fs"){
 			return null;
 		}
@@ -12,11 +12,14 @@ const plugin = {
 		}
 		return ctx;
 	},
-	render(ctx, span){
+	render(ctx, span, proxy){
 		if(ctx != null){
 			span.setAttribute("data-fs", ctx);
 		}
 		return (ctx != null);
+	},
+	dispose(ctx, proxy){
+		return;
 	},
 	styleSheet: new CSSStyleSheet()
 };

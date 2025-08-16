@@ -5,6 +5,8 @@ class HTMLAnsiElement extends HTMLElement{
 	connectedCallback(){
 		const shadow = this.shadow = this.attachShadow({mode: "closed"});
 		const ansi = this.ansi = (document.contentType == "text/html") ? document.createElement("span") : document.createElementNS("http://www.w3.org/1999/xhtml", "span");
+		this.caret = document.createRange();
+		this.caret.selectNodeContents(ansi);
 		ansi.classList.add("ansi");
 		shadow.adoptedStyleSheets.push(this.constructor.styleSheet);
 		if(this.hasAttribute("apc")){
@@ -26,9 +28,9 @@ class HTMLAnsiElement extends HTMLElement{
 		});
 	}
 	render(){
-		this.ansi.innerHTML = "";
+		this.caret.selectNodeContents(this.ansi);
+		this.caret.deleteContents();
 		const ctx = {
-			echo: true,
 			textColor: null,
 			backgroundColor: null,
 			bold: false,
@@ -106,6 +108,21 @@ class HTMLAnsiElement extends HTMLElement{
 			},
 			str: this.textContent
 		}
+		const proxy = new Proxy([this, ctx], {
+			get(target, prop, receiver){
+				if(prop == "apc"){
+					return null;
+				}
+				if(prop == "caret"){
+					return target[0].caret;
+				}
+				if(prop in ctx){
+					return target[1][prop];
+				}
+				return null;
+			},
+			set(obj, prop, value){}
+		});
 		const opr = esc => {
 			if(esc.type == "CSI"){
 				if(esc.opcode == "J"){
@@ -121,11 +138,11 @@ class HTMLAnsiElement extends HTMLElement{
 						return;
 					}
 					if(typeof csi == "function"){
-						csi(ctx);
+						csi(ctx, proxy);
 						return;
 					}
 					const param2 = esc.params.shift();
-					csi[param2](ctx, esc.params);
+					csi[param2](ctx, esc.params, proxy);
 					return;
 				}
 				return;
@@ -134,7 +151,7 @@ class HTMLAnsiElement extends HTMLElement{
 				for(let apcName of apcList){
 					const apcItem = this.constructor.apc[apcName];
 					if("apc" in apcItem){
-						ctx.apc[apcName] = apcItem.apc(ctx.apc[apcName] ?? null, esc.data);
+						ctx.apc[apcName] = apcItem.apc(ctx.apc[apcName] ?? null, esc.data, proxy);
 					}
 				}
 			}
@@ -174,13 +191,13 @@ class HTMLAnsiElement extends HTMLElement{
 			for(let apcName of apcList){
 				const apcItem = this.constructor.apc[apcName];
 				if("render" in apcItem){
-					if(apcItem.render(ctx.apc[apcName] ?? null, span)){
+					if(apcItem.render(ctx.apc[apcName] ?? null, span, proxy)){
 						plain = false;
 					}
 				}
 			}
-			span.textContent = str;
-			this.ansi.append(plain ? span.textContent : span);
+			this.caret.insertNode(plain ? document.createTextNode(str) : Object.assign(span, {textContent: str}));
+			this.caret.collapse(false);
 		}
 	}
 	disconnectedCallback() {
@@ -247,7 +264,18 @@ class HTMLAnsiElement extends HTMLElement{
 	}
 	static apc = {};
 	static srg = {
-		["0"](ctx){ Object.assign(ctx, {textColor: null, backgroundColor: null, bold: false, italic: false, underline: false, strike: false, apc: {}}); },
+		["0"](ctx, proxy){
+			const apc = Object.fromEntries(
+				Object.entries(ctx.apc).filter(entry => {
+					const key = entry.at(0);
+					return (key in this.apc) && ("dispose" in this.acp[key]);
+				}).map(entry => {
+					const [key, value] = entry;
+					return [key, this.acp[key].dispose(value, proxy)];
+				}).filter(entry => entry.at(1) !== undefined)
+			);
+			Object.assign(ctx, {textColor: null, backgroundColor: null, bold: false, italic: false, underline: false, strike: false, apc: apc});
+		},
 		["7"](ctx){
 			const {textColor, backgroundColor} = ctx;
 			ctx.textColor = backgroundColor;
